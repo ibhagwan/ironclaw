@@ -7,12 +7,13 @@
 //! File: `~/.ironclaw/.env` (standard dotenvy format)
 
 use std::path::PathBuf;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 const IRONCLAW_BASE_DIR_ENV: &str = "IRONCLAW_BASE_DIR";
 
-/// Lazily computed IronClaw base directory, cached for the lifetime of the process.
-static IRONCLAW_BASE_DIR: LazyLock<PathBuf> = LazyLock::new(compute_ironclaw_base_dir);
+/// IronClaw base directory, cached for the lifetime of the process.
+/// Uses OnceLock to allow test-time initialization control.
+static IRONCLAW_BASE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// Compute the IronClaw base directory from environment.
 ///
@@ -58,7 +59,8 @@ fn default_base_dir() -> PathBuf {
 /// Override with `IRONCLAW_BASE_DIR` environment variable.
 /// Defaults to `~/.ironclaw` (or `./.ironclaw` if home directory cannot be determined).
 ///
-/// Thread-safe: the value is computed once and cached in a `LazyLock`.
+/// Thread-safe: the value is computed once and cached in a `OnceLock`.
+/// The first call initializes the cache, subsequent calls return the cached value.
 ///
 /// # Environment Variable Behavior
 /// - If `IRONCLAW_BASE_DIR` is set to a non-empty path, that path is used.
@@ -70,7 +72,9 @@ fn default_base_dir() -> PathBuf {
 /// A `PathBuf` pointing to the base directory. The path is not validated
 /// for existence.
 pub fn ironclaw_base_dir() -> PathBuf {
-    IRONCLAW_BASE_DIR.clone()
+    IRONCLAW_BASE_DIR
+        .get_or_init(compute_ironclaw_base_dir)
+        .clone()
 }
 
 /// Path to the IronClaw-specific `.env` file: `~/.ironclaw/.env`.
@@ -792,9 +796,9 @@ INJECTED="pwned"#;
     }
 
     #[test]
-    fn test_ironclaw_base_dir_default() {
-        // This test must run first (or in isolation) before the LazyLock is initialized.
-        // It verifies that when IRONCLAW_BASE_DIR is not set, the default path is used.
+fn test_ironclaw_base_dir_default() {
+    // This test must run first (or in isolation) before the OnceLock is initialized.
+    // It verifies that when IRONCLAW_BASE_DIR is not set, the default path is used.
         let _guard = ENV_MUTEX.lock().unwrap();
         let old_val = std::env::var("IRONCLAW_BASE_DIR").ok();
         // SAFETY: ENV_MUTEX ensures single-threaded access to env vars in tests
@@ -812,9 +816,9 @@ INJECTED="pwned"#;
     }
 
     #[test]
-    fn test_ironclaw_base_dir_env_override() {
-        // This test verifies that when IRONCLAW_BASE_DIR is set,
-        // the custom path is used. Must run before LazyLock is initialized.
+fn test_ironclaw_base_dir_env_override() {
+    // This test verifies that when IRONCLAW_BASE_DIR is set,
+    // the custom path is used. Must run before OnceLock is initialized.
         let _guard = ENV_MUTEX.lock().unwrap();
         let old_val = std::env::var("IRONCLAW_BASE_DIR").ok();
         // SAFETY: ENV_MUTEX ensures single-threaded access to env vars in tests
@@ -834,9 +838,9 @@ INJECTED="pwned"#;
     }
 
     #[test]
-    fn test_compute_base_dir_env_path_join() {
-        // Verifies that ironclaw_env_path correctly joins .env to the base dir.
-        // Uses compute_ironclaw_base_dir directly to avoid LazyLock caching.
+fn test_compute_base_dir_env_path_join() {
+    // Verifies that ironclaw_env_path correctly joins .env to the base dir.
+    // Uses compute_ironclaw_base_dir directly to avoid OnceLock caching.
         let _guard = ENV_MUTEX.lock().unwrap();
         let old_val = std::env::var("IRONCLAW_BASE_DIR").ok();
         // SAFETY: ENV_MUTEX ensures single-threaded access to env vars in tests
